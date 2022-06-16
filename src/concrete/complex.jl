@@ -3,16 +3,20 @@
 # :PyComplex_ImagAsDouble => (PyPtr,) => Cdouble,
 # :PyComplex_AsCComplex => (PyPtr,) => Py_complex,
 
+pycomplex!(ans::PyRef, x::Real=0.0, y::Real=0.0) = setptr!(ans, errcheck(C.PyComplex_FromDoubles(x, y)))
+pycomplex!(ans::PyRef, x::Complex) = pycomplex!(ans, real(x), imag(x))
+pycomplex!(ans::PyRef, x, y) = pycall!(ans, pybuiltins.complex, x, y)
+pycomplex!(ans::PyRef, x) = pycall!(ans, pybuiltins.complex, x)
+
 """
     pycomplex(x=0.0)
     pycomplex(re, im)
 
 Convert `x` to a Python `complex`, or create one from given real and imaginary parts.
 """
-pycomplex(x::Real=0.0, y::Real=0.0) = pynew(errcheck(C.PyComplex_FromDoubles(x, y)))
-pycomplex(x::Complex) = pycomplex(real(x), imag(x))
-pycomplex(x) = pybuiltins.complex(x)
-pycomplex(x, y) = pybuiltins.complex(x, y)
+pycomplex(x, y) = pycomplex!(pynew(), x, y)
+pycomplex(x=0.0) = pycomplex!(pynew(), x)
+pycomplex(x::Real) = pycomplex!(pynew(), x, 0.0)
 export pycomplex
 
 pyiscomplex(x) = pytypecheck(x, pybuiltins.complex)

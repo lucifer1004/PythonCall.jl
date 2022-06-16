@@ -149,8 +149,10 @@ const CAPI_FUNC_SIGS = Dict{Symbol, Pair{Tuple, Type}}(
     :PyTuple_SetItem => (PyPtr, Py_ssize_t, PyPtr) => Cint, # steals
     # LIST
     :PyList_New => (Py_ssize_t,) => PyPtr,
+    :PyList_Size => (PyPtr,) => Py_ssize_t,
     :PyList_Append => (PyPtr, PyPtr) => Cint,
     :PyList_AsTuple => (PyPtr,) => PyPtr,
+    :PyList_GetItem => (PyPtr, Py_ssize_t) => PyPtr, # borrowed
     :PyList_SetItem => (PyPtr, Py_ssize_t, PyPtr) => Cint, # steals
     # DICT
     :PyDict_New => () => PyPtr,

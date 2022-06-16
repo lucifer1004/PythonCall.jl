@@ -2,12 +2,22 @@
 # :PyFloat_AsDouble => (PyPtr,) => Cdouble,
 
 """
+    pyfloat!(ans, x=0.0)
+
+In-place `pyfloat(x)`.
+"""
+pyfloat!(ans::PyRef, x::Real=0.0) = setptr!(ans, errcheck(C.PyFloat_FromDouble(x)))
+function pyfloat!(ans, x)
+    x = pyargref!(ans, x)
+    setptr!(ans, errcheck(C.PyNumber_Float(getptr(x))))
+end
+
+"""
     pyfloat(x=0.0)
 
 Convert `x` to a Python `float`.
 """
-pyfloat(x::Real=0.0) = pynew(errcheck(C.PyFloat_FromDouble(x)))
-pyfloat(x) = @autopy x pynew(errcheck(C.PyNumber_Float(getptr(x_))))
+pyfloat(x=0.0) = pyfloat!(pynew(), x)
 export pyfloat
 
 pyisfloat(x) = pytypecheck(x, pybuiltins.float)

@@ -8,12 +8,18 @@ export pyis
 
 pyisnot(x, y) = !pyis(x, y)
 
+
+
 """
     pyrepr(x)
 
 Equivalent to `repr(x)` in Python.
 """
-pyrepr(x) = pynew(errcheck(@autopy x C.PyObject_Repr(getptr(x_))))
+pyrepr(x) = pyrepr!(pynew(), x)
+function pyrepr!(ans::PyRef, x)
+    x2 = pyargref!(ans, x)
+    setptr!(ans, errcheck(C.PyObject_Repr(getptr(x2))))
+end
 pyrepr(::Type{String}, x) = (s=pyrepr(x); ans=pystr_asstring(s); pydel!(s); ans)
 export pyrepr
 
@@ -22,7 +28,11 @@ export pyrepr
 
 Equivalent to `ascii(x)` in Python.
 """
-pyascii(x) = pynew(errcheck(@autopy x C.PyObject_ASCII(getptr(x_))))
+pyascii(x) = pyascii!(pynew(), x)
+function pyascii!(ans::PyRef, x)
+    x2 = pyargref!(ans, x)
+    setptr!(ans, errcheck(C.PyObject_ASCII(getptr(x2))))
+end
 pyascii(::Type{String}, x) = (s=pyascii(x); ans=pystr_asstring(s); pydel!(s); ans)
 export pyascii
 
@@ -33,8 +43,10 @@ Equivalent to `hasattr(x, k)` in Python.
 
 Tests if `getattr(x, k)` raises an `AttributeError`.
 """
-function pyhasattr(x, k)
-    ptr = @autopy x k C.PyObject_GetAttr(getptr(x_), getptr(k_))
+pyhasattr(x, k) = pyhasattr!(ispy(x) && ispy(k) ? PyNullRef() : pynew(), x, k)
+function pyhasattr!(ans::PyRef, x, k)
+    x2, k2 = pyargrefs!(ans, x, k)
+    ptr = C.PyObject_GetAttr(getptr(x2), getptr(k2))
     if iserrset(ptr)
         if errmatches(pybuiltins.AttributeError)
             errclear()
@@ -47,7 +59,6 @@ function pyhasattr(x, k)
         return true
     end
 end
-# pyhasattr(x, k) = errcheck(@autopy x k C.PyObject_HasAttr(getptr(x_), getptr(k_))) == 1
 export pyhasattr
 
 """
@@ -57,9 +68,15 @@ Equivalent to `getattr(x, k)` or `x.k` in Python.
 
 If `d` is specified, it is returned if the attribute does not exist.
 """
-pygetattr(x, k) = pynew(errcheck(@autopy x k C.PyObject_GetAttr(getptr(x_), getptr(k_))))
-function pygetattr(x, k, d)
-    ptr = @autopy x k C.PyObject_GetAttr(getptr(x_), getptr(k_))
+pygetattr(x, k) = pygetattr!(pynew(), x, k)
+pygetattr(x, k, d) = pygetattr!(pynew(), x, k, d)
+function pygetattr!(ans::PyRef, x, k)
+    x2, k2 = pyargrefs!(ans, x, k)
+    setptr!(ans, errcheck(C.PyObject_GetAttr(getptr(x2), getptr(k2))))
+end
+function pygetattr!(ans::PyRef, x, k, d)
+    x2, k2 = pyargrefs!(ans, x, k)
+    ptr = C.PyObject_GetAttr(getptr(x2), getptr(k2))
     if iserrset(ptr)
         if errmatches(pybuiltins.AttributeError)
             errclear()
@@ -68,7 +85,8 @@ function pygetattr(x, k, d)
             pythrow()
         end
     else
-        return pynew(ptr)
+        setptr!(ans, ptr)
+        return ans
     end
 end
 export pygetattr
@@ -78,7 +96,12 @@ export pygetattr
 
 Equivalent to `setattr(x, k, v)` or `x.k = v` in Python.
 """
-pysetattr(x, k, v) = (errcheck(@autopy x k v C.PyObject_SetAttr(getptr(x_), getptr(k_), getptr(v_))); nothing)
+pysetattr(x, k, v) = pysetattr!(ispy(x) && ispy(k) && ispy(v) ? PyNullRef() : pynew(), x, k, v)
+function pysetattr!(ans::PyRef, x, k, v)
+    x2, k2, v2 = pyargrefs!(ans, x, k, v)
+    errcheck(C.PyObject_SetAttr(getptr(x2), getptr(k2), getptr(v2)))
+    return
+end
 export pysetattr
 
 """
@@ -206,9 +229,43 @@ Equivalent to `dir(x)` in Python.
 pydir(x) = pynew(errcheck(@autopy x C.PyObject_Dir(getptr(x_))))
 export pydir
 
-pycallargs(f) = pynew(errcheck(@autopy f C.PyObject_CallObject(getptr(f_), C.PyNULL)))
-pycallargs(f, args) = pynew(errcheck(@autopy f args C.PyObject_CallObject(getptr(f_), getptr(args_))))
-pycallargs(f, args, kwargs) = pynew(errcheck(@autopy f args kwargs C.PyObject_Call(getptr(f_), getptr(args_), getptr(kwargs_))))
+function pycallargs!(ans::PyRef, f)
+    f_ = pyargref!(ans, f)
+    setptr!(ans, errcheck(C.PyObject_CallObject(getptr(f_), C.PyNULL)))
+end
+
+function pycallargs!(ans::PyRef, f, args)
+    f_, args_ = pyargrefs!(ans, f, args)
+    setptr!(ans, errcheck(C.PyObject_CallObject(getptr(f_), getptr(args_))))
+end
+
+function pycallargs!(ans::PyRef, f, args, kwargs)
+    f_, args_, kwargs_ = pyargrefs!(ans, f, args, kwargs)
+    setptr!(ans, errcheck(C.PyObject_Call(getptr(f_), getptr(args_), getptr(kwargs_))))
+end
+
+pycallargs(f) = pycallargs!(pynew(), f)
+pycallargs(f, args) = pycallargs!(pynew(), f, args)
+pycallargs(f, args, kwargs) = pycallargs!(pynew(), f, args, kwargs)
+
+function pycall!(ans::PyRef, f, args...; kwargs...)
+    if !isempty(kwargs)
+        f3, args3, kwargs3 = pytuplerefs!(ans, Val(3))
+        Py!(f3, f)
+        pytuple_fromiter!(args3, args)
+        pystrdict_fromiter!(kwargs3, kwargs)
+        pycallargs!(ans, f3, args3, kwargs3)
+    elseif !isempty(args)
+        f2, args2 = pytuplerefs!(ans, Val(2))
+        Py!(f2, f)
+        pytuple_fromiter!(args2, args)
+        pycallargs!(ans, f2, args2)
+    else
+        f1 = pyargref!(ans, f)
+        pycallargs!(ans, f1)
+    end
+    return ans
+end
 
 """
     pycall(f, args...; kwargs...)

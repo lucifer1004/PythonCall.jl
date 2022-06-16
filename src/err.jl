@@ -37,9 +37,9 @@ function errnormalize!(t::Py, v::Py, b::Py)
     vref = Ref(vptr)
     bref = Ref(bptr)
     C.PyErr_NormalizeException(tref, vref, bref)
-    setptr!(t, tref[])
-    setptr!(v, vref[])
-    setptr!(b, bref[])
+    setfield!(t, :ptr, tref[])
+    setfield!(v, :ptr, vref[])
+    setfield!(b, :ptr, bref[])
     (t, v, b)
 end
 

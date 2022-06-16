@@ -10,6 +10,7 @@ include("utils.jl")
 
 include("cpython/CPython.jl")
 
+include("PyRef.jl")
 include("Py.jl")
 include("err.jl")
 include("config.jl")

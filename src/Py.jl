@@ -37,7 +37,7 @@ Such an object supports attribute access (`obj.attr`), indexing (`obj[idx]`), ca
 (`obj > obj2`), among other things. These operations convert all their arguments to `Py` and
 return `Py`.
 """
-mutable struct Py
+mutable struct Py <: PyRef
     ptr :: C.PyPtr
     Py(::Val{:new}, ptr::C.PyPtr) = finalizer(py_finalizer, new(ptr))
 end
@@ -51,10 +51,16 @@ function py_finalizer(x::Py)
     end
 end
 
-ispy(::Py) = true
 getptr(x::Py) = getfield(x, :ptr)
 
-setptr!(x::Py, ptr::C.PyPtr) = (setfield!(x, :ptr, ptr); x)
+function setptr!(x::Py, ptr::C.PyPtr)
+    oldptr = getptr(x)
+    if oldptr != C.PyNULL
+        C.Py_DecRef(oldptr)
+    end
+    setfield!(x, :ptr, ptr)
+    return x
+end
 
 const PYNULL_CACHE = Py[]
 
@@ -91,10 +97,8 @@ This function exists to support module-level constant Python objects. It is ille
 most PythonCall API functions at the top level of a module (i.e. before `__init__()` has run)
 so you cannot do `const x = pything()` at the top level. Instead do `const x = pynew()` at
 the top level then `pycopy!(x, pything())` inside `__init__()`.
-
-Assumes `dst` is NULL, otherwise a memory leak will occur.
 """
-pycopy!(dst::Py, src) = GC.@preserve src setptr!(dst, incref(getptr(src)))
+pycopy!(dst::PyRef, src) = setptr!(dst, incref(getptr(src)))
 
 """
     pydel!(x::Py)
@@ -114,11 +118,7 @@ be a significant source of slow-down in code which uses a lot of Python objects.
 the relatively slow finalizer on `x`.
 """
 function pydel!(x::Py)
-    ptr = getptr(x)
-    if ptr != C.PyNULL
-        C.Py_DecRef(ptr)
-        setptr!(x, C.PyNULL)
-    end
+    setptr!(x, C.PyNULL)
     push!(PYNULL_CACHE, x)
     return
 end
@@ -133,28 +133,50 @@ macro autopy(args...)
         # $ans = $body
         # $([:($ispy($v) || $pydel!($t)) for (t, v) in zip(ts, vs)]...)
         # $ans
-        $([:($t = $Py($v)) for (t, v) in zip(ts, vs)]...)
+        $([:($t = $ispy($v) ? $v : $Py($v)) for (t, v) in zip(ts, vs)]...)
         $body
     end)
 end
 
 Py(x::Py) = x
+Py(x::PyRef) = pynew(incref(getptr(x)))
 Py(x::Nothing) = pybuiltins.None
 Py(x::Bool) = x ? pybuiltins.True : pybuiltins.False
-Py(x::Union{String, SubString{String}, Char}) = pystr(x)
-Py(x::Base.CodeUnits{UInt8, String}) = pybytes(x)
-Py(x::Base.CodeUnits{UInt8, SubString{String}}) = pybytes(x)
-Py(x::Tuple) = pytuple_fromiter(x)
-Py(x::Pair) = pytuple_fromiter(x)
-Py(x::Union{Int8,Int16,Int32,Int64,Int128,UInt8,UInt16,UInt32,UInt64,UInt128,BigInt}) = pyint(x)
 Py(x::Rational{<:Union{Int8,Int16,Int32,Int64,Int128,UInt8,UInt16,UInt32,UInt64,UInt128,BigInt}}) = pyfraction(x)
-Py(x::Union{Float16,Float32,Float64}) = pyfloat(x)
-Py(x::Complex{<:Union{Float16,Float32,Float64}}) = pycomplex(x)
 Py(x::AbstractRange{<:Union{Int8,Int16,Int32,Int64,Int128,UInt8,UInt16,UInt32,UInt64,UInt128,BigInt}}) = pyrange_fromrange(x)
 Py(x::Date) = pydate(x)
 Py(x::Time) = pytime(x)
 Py(x::DateTime) = pydatetime(x)
 Py(x) = ispy(x) ? throw(MethodError(Py, (x,))) : pyjl(x)
+
+Py!(ans::PyRef, x::PyRef) = pycopy!(ans, x)  # TODO: remove pycopy!
+Py!(ans::PyRef, x) = Py!(ans, Py(x)::Py)
+
+for T in [Float16, Float32, Float64]
+    @eval Py(x::$T) = pyfloat(x)
+    @eval Py!(ans::PyRef, x::$T) = pyfloat!(ans, x)
+    @eval Py(x::Complex{$T}) = pycomplex(x)
+    @eval Py!(ans::PyRef, x::Complex{$T}) = pycomplex!(ans, x)
+end
+
+for T in [Int8, Int16, Int32, Int64, Int128, UInt8, UInt16, UInt32, UInt64, UInt128, BigInt]
+    @eval Py(x::$T) = pyint(x)
+    @eval Py!(ans::PyRef, x::$T) = pyint!(ans, x)
+end
+
+for T in [Tuple, Pair]
+    @eval Py(x::$T) = pytuple_fromiter(x)
+    @eval Py!(ans::PyRef, x::$T) = pytuple_fromiter!(ans, x)
+end
+
+for T in [String, SubString{String}, Char]
+    @eval Py(x::$T) = pystr(x)
+    @eval Py!(ans::PyRef, x::$T) = pystr!(ans, x)
+    if T <: AbstractString
+        @eval Py(x::Base.CodeUnits{UInt8, $T}) = pybytes(x)
+    end
+end
+
 
 Base.string(x::Py) = pyisnull(x) ? "<py NULL>" : pystr(String, x)
 Base.print(io::IO, x::Py) = print(io, string(x))

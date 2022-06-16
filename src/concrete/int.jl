@@ -4,32 +4,34 @@
 # :PyLong_AsLongLong => (PyPtr,) => Clonglong,
 # :PyLong_AsUnsignedLongLong => (PyPtr,) => Culonglong,
 
-pyint_fallback(x::Union{Int8,Int16,Int32,Int64,Int128,UInt8,UInt16,UInt32,UInt64,UInt128,BigInt}) =
-    pynew(errcheck(C.PyLong_FromString(string(x, base=32), C_NULL, 32)))
-pyint_fallback(x::Integer) = pyint_fallback(BigInt(x))
+pyint_fallback!(ans::PyRef, x::Union{Int8,Int16,Int32,Int64,Int128,UInt8,UInt16,UInt32,UInt64,UInt128,BigInt}) =
+    setptr!(ans, errcheck(C.PyLong_FromString(string(x, base=32), C_NULL, 32)))
+pyint_fallback!(ans::PyRef, x::Integer) = pyint_fallback!(ans, BigInt(x))
+
+function pyint!(ans::PyRef, x::Integer=0)
+    y = mod(x, Clonglong)
+    if x == y
+        setptr!(ans, errcheck(C.PyLong_FromLongLong(y)))
+    else
+        pyint_fallback!(ans, x)
+    end
+end
+function pyint!(ans::PyRef, x::Unsigned)
+    y = mod(x, Culonglong)
+    if x == y
+        setptr!(ans, errcheck(C.PyLong_FromUnsignedLongLong(y)))
+    else
+        pyint_fallback!(ans, x)
+    end
+end
+pyint!(ans::PyRef, x) = @autopy x setptr!(ans, errcheck(C.PyNumber_Long(getptr(x_))))
 
 """
     pyint(x=0)
 
 Convert `x` to a Python `int`.
 """
-function pyint(x::Integer=0)
-    y = mod(x, Clonglong)
-    if x == y
-        pynew(errcheck(C.PyLong_FromLongLong(y)))
-    else
-        pyint_fallback(x)
-    end
-end
-function pyint(x::Unsigned)
-    y = mod(x, Culonglong)
-    if x == y
-        pynew(errcheck(C.PyLong_FromUnsignedLongLong(y)))
-    else
-        pyint_fallback(x)
-    end
-end
-pyint(x) = @autopy x pynew(errcheck(C.PyNumber_Long(getptr(x_))))
+pyint(x=0) = pyint!(pynew(), x)
 export pyint
 
 pyisint(x) = pytypecheckfast(x, C.Py_TPFLAGS_LONG_SUBCLASS)

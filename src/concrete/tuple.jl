@@ -1,36 +1,39 @@
-pynulltuple(len) = pynew(errcheck(C.PyTuple_New(len)))
+pynulltuple!(ans::PyRef, len) = setptr!(ans, errcheck(C.PyTuple_New(len)))
 
-function pytuple_setitem(xs::Py, i, x)
-    errcheck(C.PyTuple_SetItem(getptr(xs), i, incref(getptr(Py(x)))))
+pynulltuple(len) = pynulltuple!(pynew(), len)
+
+function pytuple_setitem(xs::PyRef, i, x)
+    Py!(PyTupleRef(getptr(xs), i), x)
+    # errcheck(C.PyTuple_SetItem(getptr(xs), i, incref(getptr(Py(x)))))
     return xs
 end
 
-function pytuple_getitem(xs::Py, i)
-    GC.@preserve xs pynew(incref(errcheck(C.PyTuple_GetItem(getptr(xs), i))))
+function pytuple_getitem!(ans::PyRef, xs::Py, i)
+    GC.@preserve xs setptr!(ans, incref(errcheck(C.PyTuple_GetItem(getptr(xs), i))))
 end
 
-function pytuple_fromiter(xs)
+pytuple_getitem(xs, i) = pytuple_getitem!(pynew(), xs, i)
+
+function pytuple_fromiter!(ans::PyRef, xs)
     sz = Base.IteratorSize(typeof(xs))
     if sz isa Base.HasLength || sz isa Base.HasShape
         # length known, e.g. Tuple, Pair, Vector
-        ans = pynulltuple(length(xs))
+        pynulltuple!(ans, length(xs))
         for (i, x) in enumerate(xs)
             pytuple_setitem(ans, i-1, x)
         end
-        return ans
     else
         # length unknown
-        xs_ = pylist_fromiter(xs)
-        ans = pylist_astuple(xs_)
-        pydel!(xs_)
-        return ans
+        pylist_fromiter!(ans, xs)
+        pylist_astuple!(ans, ans)
     end
+    return ans
 end
 
-@generated function pytuple_fromiter(xs::Tuple)
+@generated function pytuple_fromiter!(ans::PyRef, xs::Tuple)
     n = length(xs.parameters)
     code = []
-    push!(code, :(ans = pynulltuple($n)))
+    push!(code, :(pynulltuple!(ans, $n)))
     for i in 1:n
         push!(code, :(pytuple_setitem(ans, $(i-1), xs[$i])))
     end
@@ -38,16 +41,21 @@ end
     return Expr(:block, code...)
 end
 
+pytuple_fromiter(xs) = pytuple_fromiter!(pynew(), xs)
+
+pytuple!(ans::PyRef) = pynulltuple!(ans, 0)
+pytuple!(ans::PyRef, x) = ispy(x) ? pycall!(ans, pybuiltins.tuple, x) : pytuple_fromiter!(ans, x)
+
 """
-    pytuple(x=())
+    pytuple([x])
 
 Convert `x` to a Python `tuple`.
 
 If `x` is a Python object, this is equivalent to `tuple(x)` in Python.
 Otherwise `x` must be iterable.
 """
-pytuple() = pynulltuple(0)
-pytuple(x) = ispy(x) ? pybuiltins.tuple(x) : pytuple_fromiter(x)
+pytuple() = pytuple!(pynew())
+pytuple(x) = pytuple!(pynew(), x)
 export pytuple
 
 pyistuple(x) = pytypecheckfast(x, C.Py_TPFLAGS_TUPLE_SUBCLASS)

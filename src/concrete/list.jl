@@ -1,43 +1,54 @@
-pynulllist(len) = pynew(errcheck(C.PyList_New(len)))
+pynulllist!(ans::PyRef, len) = setptr!(ans, errcheck(C.PyList_New(len)))
+
+pynulllist(len) = pynulllist!(pynew(), len)
 
 function pylist_setitem(xs::Py, i, x)
-    errcheck(C.PyList_SetItem(getptr(xs), i, incref(getptr(Py(x)))))
+    Py!(PyListRef(getptr(xs), i), x)
+    # errcheck(C.PyList_SetItem(getptr(xs), i, incref(getptr(Py(x)))))
     return xs
 end
 
 pylist_append(xs::Py, x) = errcheck(@autopy x C.PyList_Append(getptr(xs), getptr(x_)))
 
-pylist_astuple(x) = pynew(errcheck(@autopy x C.PyList_AsTuple(getptr(x_))))
+pylist_astuple!(ans::PyRef, x) = setptr!(ans, errcheck(@autopy x C.PyList_AsTuple(getptr(x_))))
 
-function pylist_fromiter(xs)
+pylist_astuple(x) = pylist_astuple!(pynew(), x)
+
+function pylist_fromiter!(ans::PyRef, xs)
     sz = Base.IteratorSize(typeof(xs))
     if sz isa Base.HasLength || sz isa Base.HasShape
         # length known
-        ans = pynulllist(length(xs))
+        pynulllist!(ans, length(xs))
         for (i, x) in enumerate(xs)
             pylist_setitem(ans, i-1, x)
         end
-        return ans
     else
         # length unknown
-        ans = pynulllist(0)
-        for x in xs
-            pylist_append(ans, x)
+        pynulllist!(ans, 0)
+        for (i, x) in enumerate(xs)
+            # pylist_append(ans, x) allocates
+            pylist_append(ans, nothing)
+            pylist_setitem(ans, i-1, x)
         end
-        return ans
     end
+    return ans
 end
 
+pylist_fromiter(xs) = pylist_fromiter!(pynew(), xs)
+
+pylist!(ans::PyRef) = pynulllist!(ans, 0)
+pylist!(ans::PyRef, x) = ispy(x) ? pycall!(ans, pybuiltins.list, x) : pylist_fromiter!(ans, x)
+
 """
-    pylist(x=())
+    pylist([x])
 
 Convert `x` to a Python `list`.
 
 If `x` is a Python object, this is equivalent to `list(x)` in Python.
 Otherwise `x` must be iterable.
 """
-pylist() = pynulllist(0)
-pylist(x) = ispy(x) ? pybuiltins.list(x) : pylist_fromiter(x)
+pylist() = pylist!(pynew())
+pylist(x) = pylist!(pynew(), x)
 export pylist
 
 """
